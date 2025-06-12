@@ -75,10 +75,13 @@ impl WorktreeManager {
         std::fs::create_dir_all(&self.base_path)
             .context("Failed to create base worktree directory")?;
 
-        self.create_branch(branch, base_branch)?;
+        let base = match base_branch {
+            Some(base) => base.to_string(),
+            _ => self.get_current_branch()?,
+        };
 
         let output = Command::new("git")
-            .args(["worktree", "add", worktree_path.to_str().unwrap(), branch])
+            .args(["worktree", "add", "-b", branch, worktree_path.to_str().unwrap(), &base])
             .current_dir(&self.project_root)
             .output()
             .context("Failed to create git worktree")?;
@@ -183,34 +186,6 @@ impl WorktreeManager {
         Ok(())
     }
 
-    fn create_branch(&self, branch: &str, base_branch: Option<&str>) -> Result<()> {
-        let base = match base_branch {
-            Some(base) => base.to_string(),
-            _ => self.get_current_branch()?,
-        };
-
-        let output = Command::new("git")
-            .args(["checkout", "-b", branch, &base])
-            .current_dir(&self.project_root)
-            .output()
-            .context("Failed to create branch")?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            if !stderr.contains("already exists") {
-                anyhow::bail!("Failed to create branch: {}", stderr);
-            }
-        }
-
-        // Return to the original branch
-        Command::new("git")
-            .args(["checkout", &base])
-            .current_dir(&self.project_root)
-            .output()
-            .context("Failed to return to original branch")?;
-
-        Ok(())
-    }
 
     fn get_current_branch(&self) -> Result<String> {
         let output = Command::new("git")
