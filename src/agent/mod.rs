@@ -39,3 +39,30 @@ pub fn start_claude_agent(
 
     Ok(())
 }
+
+pub fn start_gemini_agent(
+    worktree_info: &WorktreeInfo,
+    agent_args: &[String],
+) -> Result<()> {
+    println!("Starting Gemini agent for branch: {}", worktree_info.branch);
+    println!("Worktree path: {}", worktree_info.path.display());
+
+    let mut cmd = Command::new("gemini");
+
+    // Add forwarded agent arguments
+    cmd.args(agent_args);
+
+    cmd.current_dir(&worktree_info.path);
+    cmd.stdin(Stdio::inherit());
+    cmd.stdout(Stdio::inherit());
+    cmd.stderr(Stdio::inherit());
+
+    let status = cmd.status().context("Failed to start Gemini agent")?;
+
+    if !status.success() {
+        anyhow::bail!("Gemini agent exited with error");
+    }
+
+    Ok(())
+}
+
