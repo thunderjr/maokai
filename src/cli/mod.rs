@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+use std::string::ToString;
 
 #[derive(Parser)]
 #[command(name = "maokai")]
@@ -14,6 +15,13 @@ pub enum Commands {
     Create {
         #[arg(help = "Branch name for the worktree")]
         branch: String,
+        #[arg(
+            long,
+            help = "Agent to use",
+            value_enum,
+            default_value_t = Agents::Claude
+        )]
+        agent: Agents,
         #[arg(long, help = "Name of system prompt file in $HOME/maokai-prompts")]
         system_prompt: Option<String>,
         #[arg(
@@ -38,4 +46,19 @@ pub enum Commands {
         #[arg(help = "Branch name of the worktree")]
         branch: String,
     },
+}
+
+#[derive(ValueEnum, Clone, Debug)]
+pub enum Agents {
+    Claude,
+    Gemini,
+}
+
+impl ToString for Agents {
+    fn to_string(&self) -> String {
+        match self {
+            Agents::Claude => "claude".to_string(),
+            Agents::Gemini => "gemini".to_string(),
+        }
+    }
 }

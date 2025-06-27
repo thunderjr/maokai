@@ -4,12 +4,12 @@ A Rust CLI tool for managing git worktrees with AI agents to enable parallel dev
 
 ## Overview
 
-Maokai simplifies the process of creating isolated git worktrees and launching AI agents (Claude Code as default) within them, allowing you to work on multiple features or experiments simultaneously without context switching between branches.
+Maokai simplifies the process of creating isolated git worktrees and launching AI agents within them, allowing you to work on multiple features or experiments simultaneously without context switching between branches. Supports multiple AI agents including Claude (default) and Gemini.
 
 ## Features
 
 - **Git Worktree Management**: Create, list, and remove git worktrees with automatic branch creation
-- **AI Agent Integration**: Launch Claude agents with optional system prompts in each worktree
+- **AI Agent Integration**: Launch Claude or Gemini agents with optional system prompts in each worktree
 - **Context-Aware Listing**: Shows project-specific worktrees when inside a git repo, all worktrees globally when outside
 - **Safe Folder Naming**: Automatically sanitizes branch names for filesystem compatibility
 - **Metadata Tracking**: Stores worktree information with timestamps and status
@@ -28,10 +28,13 @@ cargo build --release
 ## Quick Start
 
 ```bash
-# Create a new worktree and launch Claude
+# Create a new worktree and launch Claude (default)
 maokai create feature/auth
 
-# Create with a system prompt
+# Create with Gemini agent
+maokai create feature/auth --agent gemini
+
+# Create with a system prompt (Claude only)
 maokai create feature/auth --system-prompt my-prompt
 
 # Create from a specific base branch
@@ -50,17 +53,19 @@ maokai path feature/auth
 ## Commands
 
 ### `create <branch> [options] [-- agent-args]`
-Creates a new git branch and worktree, then launches Claude agent.
+Creates a new git branch and worktree, then launches the specified AI agent.
 
 **Options:**
-- `--system-prompt <name>`: Use system prompt from `$HOME/maokai-prompts/<name>.md`
+- `--agent <agent>`: Specify which agent to use: `claude` (default) or `gemini`
+- `--system-prompt <name>`: Use system prompt from `$HOME/maokai-prompts/<name>.md` (Claude only)
 - `--base-branch <branch>`: Create branch from specified base (defaults to current branch)
 
 **Examples:**
 ```bash
 maokai create feature/auth
-maokai create feature/auth --system-prompt backend-dev -- code --verbose
-maokai create hotfix/bug-123 --base-branch main
+maokai create feature/auth --agent gemini
+maokai create feature/auth --agent claude --system-prompt backend-dev
+maokai create hotfix/bug-123 --base-branch main --agent claude
 ```
 
 ### `ls` or default
@@ -128,7 +133,7 @@ yay -S gum # using arch, btw
 1. **Worktree Creation**: Creates git branches without prefixes and worktrees in `$HOME/maokai-branches`
 2. **Naming Convention**: Uses `${project-name}-${safe-branch-name}` format with character sanitization
 3. **Metadata Storage**: Each worktree contains `.maokai-info.json` with tracking information
-4. **Agent Integration**: Launches `claude` command with flag forwarding and optional system prompts
+4. **Agent Integration**: Launches `claude` or `gemini` command with flag forwarding and optional system prompts (Claude only)
 5. **Context Detection**: Automatically detects if you're inside a git repository for intelligent listing
 
 ## Directory Structure
@@ -152,4 +157,5 @@ $HOME/maokai-prompts/
 
 - Rust
 - Git
-- Claude Code CLI (default agent)
+- Claude Code CLI (for Claude agent)
+- Gemini CLI (for Gemini agent)

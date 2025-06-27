@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use std::env;
 
-use maokai::agent::start_claude_agent;
-use maokai::cli::Commands;
+use maokai::agent::{start_claude_agent, start_gemini_agent};
+use maokai::cli::{Agents, Commands};
 use maokai::config::get_worktree_base_path;
 use maokai::{Cli, WorktreeManager};
 
@@ -18,19 +18,33 @@ async fn main() -> Result<()> {
     match cli.command {
         Some(Commands::Create {
             branch,
+            agent,
             system_prompt,
             base_branch,
             agent_args,
         }) => {
-            let worktree_info =
-                worktree_manager.create_worktree(&branch, "claude", base_branch.as_deref())?;
+            let worktree_info = worktree_manager.create_worktree(
+                &branch,
+                &agent.to_string(),
+                base_branch.as_deref(),
+            )?;
             println!(
                 "Created worktree for branch '{}' at: {}",
                 branch,
                 worktree_info.path.display()
             );
 
-            start_claude_agent(&worktree_info, system_prompt.as_deref(), &agent_args)?;
+            match agent {
+                Agents::Claude => {
+                    start_claude_agent(&worktree_info, system_prompt.as_deref(), &agent_args)?
+                }
+                Agents::Gemini => {
+                    if system_prompt.is_some() {
+                        anyhow::bail!("Gemini agent does not support system prompts");
+                    }
+                    start_gemini_agent(&worktree_info, &agent_args)?
+                }
+            }
         }
         Some(Commands::Ls) => {
             let worktrees = if worktree_manager.is_git_repo() {
