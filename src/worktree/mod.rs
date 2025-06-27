@@ -80,8 +80,25 @@ impl WorktreeManager {
             _ => self.get_current_branch()?,
         };
 
+        // Check if branch exists
+        let branch_exists = self.branch_exists(branch)?;
+        
+        let mut args = vec!["worktree", "add"];
+        
+        if branch_exists {
+            // If branch exists, just add the worktree without -b flag
+            args.push(worktree_path.to_str().unwrap());
+            args.push(branch);
+        } else {
+            // If branch doesn't exist, create it with -b flag
+            args.push("-b");
+            args.push(branch);
+            args.push(worktree_path.to_str().unwrap());
+            args.push(&base);
+        }
+
         let output = Command::new("git")
-            .args(["worktree", "add", "-b", branch, worktree_path.to_str().unwrap(), &base])
+            .args(&args)
             .current_dir(&self.project_root)
             .output()
             .context("Failed to create git worktree")?;
@@ -186,6 +203,16 @@ impl WorktreeManager {
         Ok(())
     }
 
+
+    fn branch_exists(&self, branch: &str) -> Result<bool> {
+        let output = Command::new("git")
+            .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch)])
+            .current_dir(&self.project_root)
+            .output()
+            .context("Failed to check if branch exists")?;
+
+        Ok(output.status.success())
+    }
 
     fn get_current_branch(&self) -> Result<String> {
         let output = Command::new("git")
