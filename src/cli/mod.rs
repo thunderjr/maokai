@@ -11,13 +11,13 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    #[command(about = "Create a new worktree with an AI agent")]
+    #[command(about = "Create a new worktree with optional custom command (use -- to separate)")]
     Create {
         #[arg(help = "Branch name for the worktree")]
         branch: String,
         #[arg(
             long,
-            help = "Agent to use",
+            help = "Agent to use (ignored if custom command provided)",
             value_enum,
             default_value_t = Agents::Claude
         )]
@@ -29,8 +29,8 @@ pub enum Commands {
             help = "Base branch to create the new branch from (defaults to current branch)"
         )]
         base_branch: Option<String>,
-        #[arg(last = true, help = "Additional flags to pass to the agent")]
-        agent_args: Vec<String>,
+        #[arg(last = true, help = "Custom command to run instead of agent (use -- to separate)")]
+        custom_command: Vec<String>,
     },
     #[command(about = "List and select a worktree to switch to")]
     Ls,
