@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use std::env;
+use std::process::{Command, Stdio};
 
 use maokai::agent::get_agent;
 use maokai::cli::Commands;
@@ -21,21 +22,46 @@ async fn main() -> Result<()> {
             agent,
             system_prompt,
             base_branch,
-            agent_args,
+            custom_command,
         }) => {
             let worktree_info = worktree_manager.create_worktree(
                 &branch,
                 &agent.to_string(),
                 base_branch.as_deref(),
             )?;
-            println!(
-                "Created worktree for branch '{}' at: {}",
-                branch,
-                worktree_info.path.display()
-            );
+            // Print path for directory change (always output the path)
+            println!("{}", worktree_info.path.display());
 
-            let agent_impl = get_agent(&agent.to_string())?;
-            agent_impl.start(&worktree_info, system_prompt.as_deref(), &agent_args)?;
+            if !custom_command.is_empty() {
+                // Run custom command
+                let (cmd_name, cmd_args) = custom_command.split_first().unwrap();
+                let mut cmd = Command::new(cmd_name);
+                cmd.args(cmd_args);
+                cmd.current_dir(&worktree_info.path);
+                
+                // Set environment variables with worktree info
+                cmd.env("MAOKAI_WORKTREE_PATH", &worktree_info.path);
+                cmd.env("MAOKAI_BRANCH", &worktree_info.branch);
+                cmd.env("MAOKAI_AGENT", &worktree_info.agent);
+                cmd.env("MAOKAI_PROJECT_NAME", &worktree_info.project_name);
+                cmd.env("MAOKAI_WORKTREE_ID", &worktree_info.id);
+                
+                cmd.stdin(Stdio::inherit());
+                cmd.stdout(Stdio::inherit());
+                cmd.stderr(Stdio::inherit());
+                
+                let status = cmd.status().map_err(|e| {
+                    anyhow::anyhow!("Failed to execute custom command '{}': {}", cmd_name, e)
+                })?;
+                
+                if !status.success() {
+                    anyhow::bail!("Custom command failed with exit code: {:?}", status.code());
+                }
+            } else {
+                // Use default agent behavior
+                let agent_impl = get_agent(&agent.to_string())?;
+                agent_impl.start(&worktree_info, system_prompt.as_deref(), &[])?;
+            }
         }
         Some(Commands::Ls) => {
             let worktrees = if worktree_manager.is_git_repo() {
