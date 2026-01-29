@@ -2,6 +2,7 @@ pub mod agent;
 pub mod cli;
 pub mod config;
 pub mod prompt;
+pub mod workspace;
 pub mod worktree;
 
 pub use cli::Cli;

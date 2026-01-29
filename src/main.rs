@@ -4,8 +4,10 @@ use std::env;
 use std::process::{Command, Stdio};
 
 use maokai::agent::get_agent;
-use maokai::cli::Commands;
+use maokai::cli::{AliasCommands, Commands, WorkspaceCommands};
 use maokai::config::get_worktree_base_path;
+use maokai::workspace::alias::AliasManager;
+use maokai::workspace::WorkspaceManager;
 use maokai::{Cli, WorktreeManager};
 
 #[tokio::main]
@@ -38,22 +40,22 @@ async fn main() -> Result<()> {
                 let mut cmd = Command::new(cmd_name);
                 cmd.args(cmd_args);
                 cmd.current_dir(&worktree_info.path);
-                
+
                 // Set environment variables with worktree info
                 cmd.env("MAOKAI_WORKTREE_PATH", &worktree_info.path);
                 cmd.env("MAOKAI_BRANCH", &worktree_info.branch);
                 cmd.env("MAOKAI_AGENT", &worktree_info.agent);
                 cmd.env("MAOKAI_PROJECT_NAME", &worktree_info.project_name);
                 cmd.env("MAOKAI_WORKTREE_ID", &worktree_info.id);
-                
+
                 cmd.stdin(Stdio::inherit());
                 cmd.stdout(Stdio::inherit());
                 cmd.stderr(Stdio::inherit());
-                
+
                 let status = cmd.status().map_err(|e| {
                     anyhow::anyhow!("Failed to execute custom command '{}': {}", cmd_name, e)
                 })?;
-                
+
                 if !status.success() {
                     anyhow::bail!("Custom command failed with exit code: {:?}", status.code());
                 }
@@ -135,6 +137,56 @@ async fn main() -> Result<()> {
             }
             eprintln!("Worktree for branch '{}' not found", branch);
             std::process::exit(1);
+        }
+        Some(Commands::Workspace { command }) => {
+            let ws_manager = WorkspaceManager::new();
+            let alias_manager = AliasManager::new();
+
+            match command {
+                WorkspaceCommands::Ls => {
+                    let workspaces = ws_manager.list()?;
+                    if workspaces.is_empty() {
+                        eprintln!("No workspaces found.");
+                    } else {
+                        for ws in workspaces {
+                            let alias_info = ws
+                                .alias
+                                .map(|a| format!(" (alias: {})", a))
+                                .unwrap_or_default();
+                            println!(
+                                "{}{} - {} projects",
+                                ws.name,
+                                alias_info,
+                                ws.projects.len()
+                            );
+                        }
+                    }
+                }
+                WorkspaceCommands::Create { name, alias } => {
+                    ws_manager.create(&name, alias.as_deref())?;
+                }
+                WorkspaceCommands::Remove { name } => {
+                    ws_manager.remove(&name)?;
+                }
+                WorkspaceCommands::Alias { command } => match command {
+                    AliasCommands::New { alias_name } => {
+                        alias_manager.create(&alias_name)?;
+                    }
+                    AliasCommands::Rm { alias_name } => {
+                        alias_manager.remove(&alias_name)?;
+                    }
+                    AliasCommands::Ls => {
+                        let aliases = alias_manager.list()?;
+                        if aliases.is_empty() {
+                            eprintln!("No aliases found.");
+                        } else {
+                            for alias in aliases {
+                                println!("{}", alias);
+                            }
+                        }
+                    }
+                },
+            }
         }
         _ => {
             // Default to listing worktrees

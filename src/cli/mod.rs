@@ -46,6 +46,50 @@ pub enum Commands {
         #[arg(help = "Branch name of the worktree")]
         branch: String,
     },
+    #[command(about = "Manage workspaces (groups of worktrees across multiple repos)")]
+    Workspace {
+        #[command(subcommand)]
+        command: WorkspaceCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum WorkspaceCommands {
+    #[command(about = "List all workspaces")]
+    Ls,
+    #[command(about = "Create a new workspace")]
+    Create {
+        #[arg(help = "Branch name for the workspace")]
+        name: String,
+        #[arg(long, help = "Alias to use for project list")]
+        alias: Option<String>,
+    },
+    #[command(about = "Remove a workspace", alias = "rm")]
+    Remove {
+        #[arg(help = "Name of the workspace to remove")]
+        name: String,
+    },
+    #[command(about = "Manage workspace aliases")]
+    Alias {
+        #[command(subcommand)]
+        command: AliasCommands,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum AliasCommands {
+    #[command(about = "Create a new alias")]
+    New {
+        #[arg(help = "Name of the alias")]
+        alias_name: String,
+    },
+    #[command(about = "Remove an alias")]
+    Rm {
+        #[arg(help = "Name of the alias to remove")]
+        alias_name: String,
+    },
+    #[command(about = "List all aliases")]
+    Ls,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
