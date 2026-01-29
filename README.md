@@ -12,7 +12,8 @@ Maokai simplifies the process of creating isolated git worktrees and launching A
 - **AI Agent Integration**: Launch Claude or Gemini agents with optional system prompts in each worktree
 - **Context-Aware Listing**: Shows project-specific worktrees when inside a git repo, all worktrees globally when outside
 - **Safe Folder Naming**: Automatically sanitizes branch names for filesystem compatibility
-- **Metadata Tracking**: Stores worktree information with timestamps and status
+- **Centralized Metadata**: Stores all worktree information in `~/.maokai/worktrees.json`
+- **Workspace Support**: Create and manage groups of worktrees across multiple repositories
 - **Shell Integration**: Designed to work with external UI tools like `gum`
 
 ## Installation
@@ -84,11 +85,43 @@ Shows detailed status of all worktrees including paths, agents, and creation tim
 ### `path <branch>`
 Returns the filesystem path to the specified worktree.
 
+### `workspace`
+Manage groups of worktrees across multiple repositories.
+
+```bash
+# Create a workspace (opens editor to specify projects)
+maokai workspace create my-feature
+
+# Create workspace from a saved alias
+maokai workspace create my-feature my-alias
+
+# List all workspaces
+maokai workspace ls
+
+# Remove a workspace
+maokai workspace remove my-feature
+
+# Force remove (even with uncommitted changes)
+maokai workspace remove my-feature --force
+```
+
+**Workspace Aliases:**
+```bash
+# Create an alias for a set of projects
+maokai workspace alias create my-projects
+
+# List aliases
+maokai workspace alias ls
+
+# Remove an alias
+maokai workspace alias remove my-projects
+```
+
 ## Configuration
 
 Maokai uses environment variables for configuration:
 
-- `MAOKAI_WORKTREE_PATH`: Base directory for worktrees (default: `$HOME/maokai-branches`)
+- `MAOKAI_WORKTREE_PATH`: Base directory for worktrees (default: `~/.maokai/worktrees`)
 
 ## System Prompts
 
@@ -130,26 +163,33 @@ yay -S gum # using arch, btw
 
 ## How It Works
 
-1. **Worktree Creation**: Creates git branches without prefixes and worktrees in `$HOME/maokai-branches`
+1. **Worktree Creation**: Creates git branches and worktrees in `~/.maokai/worktrees`
 2. **Naming Convention**: Uses `${project-name}-${safe-branch-name}` format with character sanitization
-3. **Metadata Storage**: Each worktree contains `.maokai-info.json` with tracking information
+3. **Centralized Registry**: All worktree metadata stored in `~/.maokai/worktrees.json`
 4. **Agent Integration**: Launches `claude` or `gemini` command with flag forwarding and optional system prompts (Claude only)
 5. **Context Detection**: Automatically detects if you're inside a git repository for intelligent listing
 
 ## Directory Structure
 
 ```
-$HOME/maokai-branches/
-├── myproject-feature_auth/          # Worktree for feature/auth branch
-│   ├── .maokai-info.json           # Metadata
-│   └── ...                         # Project files
-└── myproject-hotfix_bug-123/       # Worktree for hotfix/bug-123 branch
-    ├── .maokai-info.json
-    └── ...
+~/.maokai/
+├── worktrees.json                    # Central registry of all worktrees
+├── worktrees/
+│   ├── myproject-feature-auth/       # Worktree for feature/auth branch
+│   │   └── ...                       # Project files (no metadata files)
+│   └── myproject-hotfix-bug-123/     # Worktree for hotfix/bug-123 branch
+│       └── ...
+├── workspaces/
+│   ├── my-workspace.json             # Workspace metadata
+│   └── my-workspace/                 # Worktrees for this workspace
+│       ├── project-a/
+│       └── project-b/
+└── aliases/                          # Workspace alias configurations
+    └── my-alias.yml
 
 $HOME/maokai-prompts/
-├── backend-dev.md                  # System prompt for backend development
-├── frontend.md                     # System prompt for frontend work
+├── backend-dev.md                    # System prompt for backend development
+├── frontend.md                       # System prompt for frontend work
 └── ...
 ```
 
