@@ -4,11 +4,14 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use uuid::Uuid;
 
+use crate::config::worktrees_registry_path;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WorktreeInfo {
     pub id: String,
     pub branch: String,
     pub path: PathBuf,
+    pub project_root: PathBuf,
     pub project_name: String,
     pub agent: String,
     pub created_at: chrono::DateTime<chrono::Utc>,
@@ -20,6 +23,11 @@ pub enum WorktreeStatus {
     Active,
     Paused,
     Completed,
+}
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct WorktreeRegistry {
+    worktrees: Vec<WorktreeInfo>,
 }
 
 pub struct WorktreeManager {
@@ -39,23 +47,10 @@ impl WorktreeManager {
         self.project_root.join(".git").exists()
     }
 
+    /// List all worktrees from the central registry.
+    /// Optionally filters by project_root matching the current manager's project_root.
     pub fn list_all_worktrees(&self) -> Result<Vec<WorktreeInfo>> {
-        let mut all_worktrees = Vec::new();
-
-        if !self.base_path.exists() {
-            return Ok(all_worktrees);
-        }
-
-        for entry in std::fs::read_dir(&self.base_path)? {
-            let entry = entry?;
-            let path = entry.path();
-
-            if path.is_dir() {
-                if let Ok(info) = self.load_worktree_info(&path) {
-                    all_worktrees.push(info);
-                }
-            }
-        }
+        let mut all_worktrees = load_registry()?;
 
         // Sort by creation time (newest first)
         all_worktrees.sort_by(|a, b| b.created_at.cmp(&a.created_at));
@@ -102,9 +97,9 @@ impl WorktreeManager {
 
         // Check if branch exists
         let branch_exists = self.branch_exists(branch)?;
-        
+
         let mut args = vec!["worktree", "add"];
-        
+
         if branch_exists {
             // If branch exists, just add the worktree without -b flag
             args.push(worktree_path.to_str().unwrap());
@@ -134,13 +129,14 @@ impl WorktreeManager {
             id: Uuid::new_v4().to_string(),
             branch: branch.to_string(),
             path: worktree_path,
+            project_root: self.project_root.clone(),
             project_name,
             agent: agent.to_string(),
             created_at: chrono::Utc::now(),
             status: WorktreeStatus::Active,
         };
 
-        self.save_worktree_info(&worktree_info)?;
+        add_to_registry(&worktree_info)?;
         self.copy_env_files(&worktree_info.path)?;
         Ok(worktree_info)
     }
@@ -161,6 +157,8 @@ impl WorktreeManager {
         Ok(())
     }
 
+    /// List worktrees for this project by cross-referencing git worktree list with the registry.
+    /// Returns the intersection (validates worktrees still exist in git).
     pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>> {
         let output = Command::new("git")
             .args(["worktree", "list", "--porcelain"])
@@ -173,34 +171,31 @@ impl WorktreeManager {
         }
 
         let output_str = String::from_utf8_lossy(&output.stdout);
-        let mut worktrees = Vec::new();
+        let mut git_worktree_paths: Vec<PathBuf> = Vec::new();
 
         for chunk in output_str.split("\n\n") {
             if chunk.trim().is_empty() {
                 continue;
             }
 
-            let lines: Vec<&str> = chunk.lines().collect();
-            let mut worktree_path = None;
-            let mut branch = None;
-
-            for line in lines {
+            for line in chunk.lines() {
                 if line.starts_with("worktree ") {
-                    worktree_path = Some(line.strip_prefix("worktree ").unwrap());
-                } else if line.starts_with("branch ") {
-                    let branch_full = line.strip_prefix("branch ").unwrap();
-                    if branch_full.starts_with("refs/heads/") {
-                        branch = Some(branch_full.strip_prefix("refs/heads/").unwrap());
+                    if let Some(path) = line.strip_prefix("worktree ") {
+                        git_worktree_paths.push(PathBuf::from(path));
                     }
                 }
             }
-
-            if let (Some(path), Some(_br)) = (worktree_path, branch) {
-                if let Ok(info) = self.load_worktree_info(Path::new(path)) {
-                    worktrees.push(info);
-                }
-            }
         }
+
+        // Load registry and filter to worktrees that exist in git and match this project
+        let registry = load_registry()?;
+        let worktrees: Vec<WorktreeInfo> = registry
+            .into_iter()
+            .filter(|info| {
+                info.project_root == self.project_root
+                    && git_worktree_paths.contains(&info.path)
+            })
+            .collect();
 
         Ok(worktrees)
     }
@@ -250,7 +245,7 @@ impl WorktreeManager {
             .current_dir(&self.project_root)
             .output();
 
-        self.remove_worktree_info(&worktree_info.path)?;
+        remove_from_registry(&worktree_info.path)?;
         Ok(())
     }
 
@@ -279,13 +274,18 @@ impl WorktreeManager {
             .current_dir(&self.project_root)
             .output();
 
-        self.remove_worktree_info(path)?;
+        remove_from_registry(path)?;
         Ok(())
     }
 
     fn branch_exists(&self, branch: &str) -> Result<bool> {
         let output = Command::new("git")
-            .args(["show-ref", "--verify", "--quiet", &format!("refs/heads/{}", branch)])
+            .args([
+                "show-ref",
+                "--verify",
+                "--quiet",
+                &format!("refs/heads/{}", branch),
+            ])
             .current_dir(&self.project_root)
             .output()
             .context("Failed to check if branch exists")?;
@@ -324,29 +324,6 @@ impl WorktreeManager {
         }
     }
 
-    fn save_worktree_info(&self, info: &WorktreeInfo) -> Result<()> {
-        let info_path = info.path.join(".maokai-info.json");
-        let content =
-            serde_json::to_string_pretty(info).context("Failed to serialize worktree info")?;
-        std::fs::write(&info_path, content).context("Failed to write worktree info")?;
-        Ok(())
-    }
-
-    fn load_worktree_info(&self, worktree_path: &Path) -> Result<WorktreeInfo> {
-        let info_path = worktree_path.join(".maokai-info.json");
-        let content =
-            std::fs::read_to_string(&info_path).context("Failed to read worktree info")?;
-        serde_json::from_str(&content).context("Failed to parse worktree info")
-    }
-
-    fn remove_worktree_info(&self, worktree_path: &Path) -> Result<()> {
-        let info_path = worktree_path.join(".maokai-info.json");
-        if info_path.exists() {
-            std::fs::remove_file(&info_path).context("Failed to remove worktree info")?;
-        }
-        Ok(())
-    }
-
     fn sanitize_branch_name(&self, branch: &str) -> String {
         branch
             .replace('/', "-")
@@ -369,4 +346,166 @@ impl WorktreeManager {
         let worktree_name = format!("{}-{}", project_name, safe_branch_name);
         self.base_path.join(&worktree_name)
     }
+}
+
+// Registry functions
+
+fn load_registry() -> Result<Vec<WorktreeInfo>> {
+    let registry_path = worktrees_registry_path();
+
+    if !registry_path.exists() {
+        // Attempt migration from old .maokai-info.json files
+        return migrate_old_worktree_info();
+    }
+
+    let content = std::fs::read_to_string(&registry_path)
+        .context("Failed to read worktrees registry")?;
+    let registry: WorktreeRegistry =
+        serde_json::from_str(&content).context("Failed to parse worktrees registry")?;
+
+    Ok(registry.worktrees)
+}
+
+fn save_registry(worktrees: &[WorktreeInfo]) -> Result<()> {
+    let registry_path = worktrees_registry_path();
+
+    // Ensure parent directory exists
+    if let Some(parent) = registry_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let registry = WorktreeRegistry {
+        worktrees: worktrees.to_vec(),
+    };
+    let content =
+        serde_json::to_string_pretty(&registry).context("Failed to serialize worktrees registry")?;
+    std::fs::write(&registry_path, content).context("Failed to write worktrees registry")?;
+    Ok(())
+}
+
+fn add_to_registry(info: &WorktreeInfo) -> Result<()> {
+    let mut worktrees = load_registry().unwrap_or_default();
+    worktrees.push(info.clone());
+    save_registry(&worktrees)
+}
+
+fn remove_from_registry(path: &Path) -> Result<()> {
+    let mut worktrees = load_registry().unwrap_or_default();
+    worktrees.retain(|wt| wt.path != path);
+    save_registry(&worktrees)
+}
+
+/// Migrate old .maokai-info.json files from worktrees to the central registry.
+fn migrate_old_worktree_info() -> Result<Vec<WorktreeInfo>> {
+    use crate::config::get_worktree_base_path;
+
+    let base_path = get_worktree_base_path();
+    let mut migrated = Vec::new();
+
+    if !base_path.exists() {
+        return Ok(migrated);
+    }
+
+    // Scan for .maokai-info.json files in worktree directories
+    if let Ok(entries) = std::fs::read_dir(&base_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let info_path = path.join(".maokai-info.json");
+                if info_path.exists() {
+                    if let Ok(content) = std::fs::read_to_string(&info_path) {
+                        // Try to parse as old format (without project_root)
+                        #[derive(Deserialize)]
+                        struct OldWorktreeInfo {
+                            id: String,
+                            branch: String,
+                            path: PathBuf,
+                            project_name: String,
+                            agent: String,
+                            created_at: chrono::DateTime<chrono::Utc>,
+                            status: WorktreeStatus,
+                        }
+
+                        if let Ok(old_info) = serde_json::from_str::<OldWorktreeInfo>(&content) {
+                            // Convert to new format with empty project_root (we don't know it)
+                            let new_info = WorktreeInfo {
+                                id: old_info.id,
+                                branch: old_info.branch,
+                                path: old_info.path,
+                                project_root: PathBuf::new(), // Unknown for migrated entries
+                                project_name: old_info.project_name,
+                                agent: old_info.agent,
+                                created_at: old_info.created_at,
+                                status: old_info.status,
+                            };
+                            migrated.push(new_info);
+
+                            // Delete the old .maokai-info.json file
+                            let _ = std::fs::remove_file(&info_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Also check workspaces directory for old .maokai-info.json files
+    let workspaces_dir = crate::config::workspaces_dir();
+    if workspaces_dir.exists() {
+        if let Ok(workspace_entries) = std::fs::read_dir(&workspaces_dir) {
+            for workspace_entry in workspace_entries.flatten() {
+                let workspace_path = workspace_entry.path();
+                if workspace_path.is_dir() {
+                    // Check subdirectories within each workspace
+                    if let Ok(project_entries) = std::fs::read_dir(&workspace_path) {
+                        for project_entry in project_entries.flatten() {
+                            let project_path = project_entry.path();
+                            if project_path.is_dir() {
+                                let info_path = project_path.join(".maokai-info.json");
+                                if info_path.exists() {
+                                    if let Ok(content) = std::fs::read_to_string(&info_path) {
+                                        #[derive(Deserialize)]
+                                        struct OldWorktreeInfo {
+                                            id: String,
+                                            branch: String,
+                                            path: PathBuf,
+                                            project_name: String,
+                                            agent: String,
+                                            created_at: chrono::DateTime<chrono::Utc>,
+                                            status: WorktreeStatus,
+                                        }
+
+                                        if let Ok(old_info) =
+                                            serde_json::from_str::<OldWorktreeInfo>(&content)
+                                        {
+                                            let new_info = WorktreeInfo {
+                                                id: old_info.id,
+                                                branch: old_info.branch,
+                                                path: old_info.path,
+                                                project_root: PathBuf::new(),
+                                                project_name: old_info.project_name,
+                                                agent: old_info.agent,
+                                                created_at: old_info.created_at,
+                                                status: old_info.status,
+                                            };
+                                            migrated.push(new_info);
+
+                                            let _ = std::fs::remove_file(&info_path);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Save migrated entries to the new registry if any were found
+    if !migrated.is_empty() {
+        save_registry(&migrated)?;
+    }
+
+    Ok(migrated)
 }

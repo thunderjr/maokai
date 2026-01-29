@@ -20,3 +20,7 @@ pub fn get_worktree_base_path() -> PathBuf {
         base_dir().join("worktrees")
     }
 }
+
+pub fn worktrees_registry_path() -> PathBuf {
+    base_dir().join("worktrees.json")
+}
