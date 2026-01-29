@@ -121,7 +121,24 @@ impl WorktreeManager {
         };
 
         self.save_worktree_info(&worktree_info)?;
+        self.copy_env_files(&worktree_info.path)?;
         Ok(worktree_info)
+    }
+
+    fn copy_env_files(&self, worktree_path: &Path) -> Result<()> {
+        for entry in std::fs::read_dir(&self.project_root)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if name.starts_with(".env") {
+                        let dest = worktree_path.join(name);
+                        std::fs::copy(&path, &dest)?;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     pub fn list_worktrees(&self) -> Result<Vec<WorktreeInfo>> {
@@ -270,15 +287,16 @@ impl WorktreeManager {
 
     fn sanitize_branch_name(&self, branch: &str) -> String {
         branch
-            .replace('/', "_")
-            .replace('\\', "_")
-            .replace(':', "_")
-            .replace('*', "_")
-            .replace('?', "_")
-            .replace('"', "_")
-            .replace('<', "_")
-            .replace('>', "_")
-            .replace('|', "_")
+            .replace('/', "-")
+            .replace('\\', "-")
+            .replace(':', "-")
+            .replace('*', "-")
+            .replace('?', "-")
+            .replace('"', "-")
+            .replace('<', "-")
+            .replace('>', "-")
+            .replace('|', "-")
+            .replace(' ', "-")
     }
 
     pub fn get_worktree_path(&self, branch: &str) -> PathBuf {
