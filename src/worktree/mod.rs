@@ -71,7 +71,27 @@ impl WorktreeManager {
         let project_name = self.get_project_name()?;
         let safe_branch_name = self.sanitize_branch_name(branch);
         let worktree_name = format!("{}-{}", project_name, safe_branch_name);
-        let worktree_path = self.base_path.join(&worktree_name);
+        self.create_worktree_at(&worktree_name, branch, agent, base_branch)
+    }
+
+    pub fn create_workspace_worktree(
+        &self,
+        branch: &str,
+        base_branch: Option<&str>,
+    ) -> Result<WorktreeInfo> {
+        let project_name = self.get_project_name()?;
+        self.create_worktree_at(&project_name, branch, "none", base_branch)
+    }
+
+    fn create_worktree_at(
+        &self,
+        worktree_name: &str,
+        branch: &str,
+        agent: &str,
+        base_branch: Option<&str>,
+    ) -> Result<WorktreeInfo> {
+        let project_name = self.get_project_name()?;
+        let worktree_path = self.base_path.join(worktree_name);
         std::fs::create_dir_all(&self.base_path)
             .context("Failed to create base worktree directory")?;
 
@@ -186,6 +206,14 @@ impl WorktreeManager {
     }
 
     pub fn remove_worktree(&self, branch: &str) -> Result<()> {
+        self.remove_worktree_with_options(branch, false)
+    }
+
+    pub fn remove_worktree_force(&self, branch: &str) -> Result<()> {
+        self.remove_worktree_with_options(branch, true)
+    }
+
+    fn remove_worktree_with_options(&self, branch: &str, force: bool) -> Result<()> {
         // Find the worktree by branch name from existing worktrees
         let worktrees = if self.is_git_repo() {
             self.list_worktrees()?
@@ -198,8 +226,14 @@ impl WorktreeManager {
             .find(|wt| wt.branch == branch)
             .ok_or_else(|| anyhow::anyhow!("Worktree for branch '{}' not found", branch))?;
 
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(worktree_info.path.to_str().unwrap());
+
         let output = Command::new("git")
-            .args(["worktree", "remove", worktree_info.path.to_str().unwrap()])
+            .args(&args)
             .current_dir(&self.project_root)
             .output()
             .context("Failed to remove git worktree")?;
@@ -220,6 +254,34 @@ impl WorktreeManager {
         Ok(())
     }
 
+    pub fn remove_worktree_at_path(&self, path: &Path, branch: &str, force: bool) -> Result<()> {
+        let mut args = vec!["worktree", "remove"];
+        if force {
+            args.push("--force");
+        }
+        args.push(path.to_str().unwrap());
+
+        let output = Command::new("git")
+            .args(&args)
+            .current_dir(&self.project_root)
+            .output()
+            .context("Failed to remove git worktree")?;
+
+        if !output.status.success() {
+            anyhow::bail!(
+                "Failed to remove worktree: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let _ = Command::new("git")
+            .args(["branch", "-D", branch])
+            .current_dir(&self.project_root)
+            .output();
+
+        self.remove_worktree_info(path)?;
+        Ok(())
+    }
 
     fn branch_exists(&self, branch: &str) -> Result<bool> {
         let output = Command::new("git")
