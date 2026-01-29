@@ -68,6 +68,8 @@ pub enum WorkspaceCommands {
     Remove {
         #[arg(help = "Name of the workspace to remove")]
         name: String,
+        #[arg(long, help = "Force removal even with modified/untracked files")]
+        force: bool,
     },
     #[command(about = "Manage workspace aliases")]
     Alias {

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-use crate::config::{get_worktree_base_path, workspaces_dir};
+use crate::config::workspaces_dir;
 use crate::WorktreeManager;
 
 use self::alias::AliasManager;
@@ -58,14 +58,14 @@ impl WorkspaceManager {
             anyhow::bail!("No projects specified for workspace");
         }
 
-        std::fs::create_dir_all(workspaces_dir())?;
+        let workspace_base = workspaces_dir().join(&safe_name);
+        std::fs::create_dir_all(&workspace_base)?;
 
-        let worktree_base = get_worktree_base_path();
         let mut created_worktrees = Vec::new();
 
         for project in &projects {
-            let manager = WorktreeManager::new(project.clone(), worktree_base.clone());
-            match manager.create_worktree(name, "none", None) {
+            let manager = WorktreeManager::new(project.clone(), workspace_base.clone());
+            match manager.create_workspace_worktree(name, None) {
                 Ok(info) => {
                     eprintln!(
                         "Created worktree for {} at {}",
@@ -104,23 +104,29 @@ impl WorkspaceManager {
         Ok(())
     }
 
-    pub fn remove(&self, name: &str) -> Result<()> {
+    pub fn remove(&self, name: &str, force: bool) -> Result<()> {
         let safe_name = sanitize_name(name);
-        let workspace_path = workspaces_dir().join(format!("{}.json", safe_name));
+        let workspace_meta_path = workspaces_dir().join(format!("{}.json", safe_name));
+        let workspace_base = workspaces_dir().join(&safe_name);
 
-        if !workspace_path.exists() {
+        if !workspace_meta_path.exists() {
             anyhow::bail!("Workspace '{}' not found", name);
         }
 
-        let content = std::fs::read_to_string(&workspace_path)?;
+        let content = std::fs::read_to_string(&workspace_meta_path)?;
         let workspace_info: WorkspaceInfo = serde_json::from_str(&content)?;
 
-        let worktree_base = get_worktree_base_path();
         let mut had_errors = false;
 
         for project in &workspace_info.projects {
-            let manager = WorktreeManager::new(project.clone(), worktree_base.clone());
-            match manager.remove_worktree(&workspace_info.name) {
+            let project_name = project
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("project");
+            let worktree_path = workspace_base.join(project_name);
+            let manager = WorktreeManager::new(project.clone(), workspace_base.clone());
+
+            match manager.remove_worktree_at_path(&worktree_path, &workspace_info.name, force) {
                 Ok(_) => {
                     eprintln!("Removed worktree for {}", project.display());
                 }
@@ -135,7 +141,8 @@ impl WorkspaceManager {
             }
         }
 
-        std::fs::remove_file(&workspace_path)?;
+        std::fs::remove_file(&workspace_meta_path)?;
+        let _ = std::fs::remove_dir(&workspace_base);
 
         if had_errors {
             eprintln!(

@@ -165,8 +165,8 @@ async fn main() -> Result<()> {
                 WorkspaceCommands::Create { name, alias } => {
                     ws_manager.create(&name, alias.as_deref())?;
                 }
-                WorkspaceCommands::Remove { name } => {
-                    ws_manager.remove(&name)?;
+                WorkspaceCommands::Remove { name, force } => {
+                    ws_manager.remove(&name, force)?;
                 }
                 WorkspaceCommands::Alias { command } => match command {
                     AliasCommands::New { alias_name } => {
